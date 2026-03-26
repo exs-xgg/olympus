@@ -1,7 +1,7 @@
 """Pydantic schemas for API request/response types."""
 
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 from pydantic import BaseModel, Field
 
 
@@ -26,14 +26,24 @@ class TaskResponse(BaseModel):
     human_input_request: Optional[str] = None
     human_input_response: Optional[str] = None
     thread_id: Optional[str] = None
+    metadata_json: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
 
+class HITLApprovalDecision(BaseModel):
+    action_id: str = Field(..., min_length=1, max_length=200)
+    decision: Literal["approve", "edit", "reject"]
+    params: dict[str, Any] = Field(default_factory=dict)
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    approved_by: Optional[str] = Field(default=None, max_length=200)
+
+
 class TaskResumeRequest(BaseModel):
-    human_input: str = Field(..., min_length=1)
+    human_input: str = Field(default="")
+    approval: Optional[HITLApprovalDecision] = None
 
 
 class TaskRejectRequest(BaseModel):

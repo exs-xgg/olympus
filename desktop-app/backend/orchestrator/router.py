@@ -229,6 +229,9 @@ async def _run_task_in_background(task_id: str, description: str):
         "human_question": "",
         "iteration_count": 0,
         "reviewer_approved": False,
+        "pending_action": {},
+        "approval_status": "not_required",
+        "github_repo_created": False,
     }
 
     async with async_session_factory() as db:
@@ -329,6 +332,8 @@ async def _run_task_in_background(task_id: str, description: str):
             if final_status == "waiting_for_human":
                 # Graph hit an interrupt — task is paused
                 question = result.get("human_question", "Human input required")
+                pending_action = result.get("pending_action") or {}
+                approval_status = result.get("approval_status", "pending")
                 await db.execute(
                     update(TaskModel)
                     .where(TaskModel.id == task_id)
@@ -336,6 +341,10 @@ async def _run_task_in_background(task_id: str, description: str):
                         status=TaskStatus.WAITING_FOR_HUMAN,
                         assigned_agent=result.get("current_agent", "supervisor"),
                         human_input_request=question,
+                        metadata_json={
+                            "pending_action": pending_action,
+                            "approval_status": approval_status,
+                        },
                     )
                 )
                 await db.commit()
@@ -345,7 +354,10 @@ async def _run_task_in_background(task_id: str, description: str):
                     "human_input_request": question,
                 })
                 await ws_manager.broadcast_hitl_request({
-                    "task_id": task_id, "question": question,
+                    "task_id": task_id,
+                    "question": question,
+                    "pending_action": pending_action,
+                    "approval_status": approval_status,
                 })
             else:
                 # Check if graph was interrupted (for HITL)
@@ -355,6 +367,8 @@ async def _run_task_in_background(task_id: str, description: str):
                     # Graph is paused at an interrupt point
                     state_values = snapshot.values
                     question = state_values.get("human_question", "Human input required")
+                    pending_action = state_values.get("pending_action") or {}
+                    approval_status = state_values.get("approval_status", "pending")
                     await db.execute(
                         update(TaskModel)
                         .where(TaskModel.id == task_id)
@@ -362,6 +376,10 @@ async def _run_task_in_background(task_id: str, description: str):
                             status=TaskStatus.WAITING_FOR_HUMAN,
                             assigned_agent=state_values.get("current_agent", "supervisor"),
                             human_input_request=question,
+                            metadata_json={
+                                "pending_action": pending_action,
+                                "approval_status": approval_status,
+                            },
                         )
                     )
                     await db.commit()
@@ -371,7 +389,10 @@ async def _run_task_in_background(task_id: str, description: str):
                         "human_input_request": question,
                     })
                     await ws_manager.broadcast_hitl_request({
-                        "task_id": task_id, "question": question,
+                        "task_id": task_id,
+                        "question": question,
+                        "pending_action": pending_action,
+                        "approval_status": approval_status,
                     })
                 else:
                     # Task completed
@@ -465,24 +486,29 @@ async def resume_task(
     if task.status != TaskStatus.WAITING_FOR_HUMAN:
         raise HTTPException(status_code=400, detail=f"Task is not waiting for human input (status: {task.status})")
 
+    resume_payload = {
+        "human_input": body.human_input,
+        "approval": body.approval.model_dump() if body.approval else None,
+    }
+
     # Store the human response
-    task.human_input_response = body.human_input
+    task.human_input_response = body.human_input or ""
     task.status = TaskStatus.RUNNING
     await db.commit()
 
-    await _log_action(db, task_id, "human_input_received", detail=body.human_input)
+    await _log_action(db, task_id, "human_input_received", detail=str(resume_payload)[:4000])
     await ws_manager.broadcast_task_update({
         "id": task_id, "status": "running",
     })
 
     # Resume the graph in background
-    asyncio.create_task(_resume_task_in_background(task_id, body.human_input, task.thread_id))
+    asyncio.create_task(_resume_task_in_background(task_id, resume_payload, task.thread_id))
 
     await db.refresh(task)
     return task
 
 
-async def _resume_task_in_background(task_id: str, human_input: str, thread_id: str):
+async def _resume_task_in_background(task_id: str, human_input, thread_id: str):
     """Resume a paused LangGraph execution with human input."""
     from models.database import async_session_factory
 
@@ -507,12 +533,18 @@ async def _resume_task_in_background(task_id: str, human_input: str, thread_id: 
                 # Paused again at another interrupt
                 state_values = snapshot.values
                 question = state_values.get("human_question", "Human input required again")
+                pending_action = state_values.get("pending_action") or {}
+                approval_status = state_values.get("approval_status", "pending")
                 await db.execute(
                     update(TaskModel)
                     .where(TaskModel.id == task_id)
                     .values(
                         status=TaskStatus.WAITING_FOR_HUMAN,
                         human_input_request=question,
+                        metadata_json={
+                            "pending_action": pending_action,
+                            "approval_status": approval_status,
+                        },
                     )
                 )
                 await db.commit()
@@ -521,7 +553,10 @@ async def _resume_task_in_background(task_id: str, human_input: str, thread_id: 
                     "human_input_request": question,
                 })
                 await ws_manager.broadcast_hitl_request({
-                    "task_id": task_id, "question": question,
+                    "task_id": task_id,
+                    "question": question,
+                    "pending_action": pending_action,
+                    "approval_status": approval_status,
                 })
             else:
                 # Completed

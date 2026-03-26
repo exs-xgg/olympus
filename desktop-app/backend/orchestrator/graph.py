@@ -8,6 +8,11 @@ This is the brain of the control plane. It uses:
 
 import logging
 import operator
+import os
+import re
+import subprocess
+import uuid
+import json
 from typing import Annotated, TypedDict, Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -38,6 +43,11 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 _checkpointer_cm = None
 _custom_agents: dict[str, dict] = {}
+BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if os.path.isabs(settings.shell_working_dir):
+    WORKSPACE = os.path.abspath(settings.shell_working_dir)
+else:
+    WORKSPACE = os.path.abspath(os.path.join(BACKEND_ROOT, settings.shell_working_dir))
 
 _TOOL_REGISTRY = {
     "run_shell_command": run_shell_command,
@@ -66,6 +76,9 @@ class AgentState(TypedDict):
     human_question: str
     iteration_count: int
     reviewer_approved: bool
+    pending_action: dict
+    approval_status: str
+    github_repo_created: bool
 
 
 # --- Node Functions ---
@@ -137,6 +150,49 @@ def _next_planned_custom_agent(state: AgentState) -> str | None:
     return None
 
 
+def _parse_repo_name(task_description: str) -> str:
+    match = re.search(r"(?:repo(?:sitory)?\s+(?:named|called)\s+)([a-zA-Z0-9._-]+)", task_description, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", task_description.lower()).strip("-")
+    return (slug[:40] or f"olympus-task-{uuid.uuid4().hex[:8]}")
+
+
+def _extract_pending_github_action(state: AgentState) -> dict | None:
+    task_description = state.get("task_description", "")
+    lowered = task_description.lower()
+    if "github" not in lowered or ("repo" not in lowered and "repository" not in lowered):
+        return None
+    return {
+        "action_id": f"create-github-repo-{state['task_id']}",
+        "type": "create_github_repo",
+        "requires_approval": True,
+        "proposed_params": {
+            "name": _parse_repo_name(task_description),
+            "visibility": "private",
+            "owner": "",
+            "description": task_description[:200],
+        },
+    }
+
+
+def _parse_human_response_payload(human_response) -> dict:
+    if isinstance(human_response, dict):
+        return human_response
+    if isinstance(human_response, str):
+        raw = human_response.strip()
+        if not raw:
+            return {"human_input": ""}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        return {"human_input": raw}
+    return {"human_input": str(human_response)}
+
+
 def supervisor_node(state: AgentState) -> Command:
     """Supervisor decides which agent to invoke next or whether to finish."""
     _refresh_custom_agents()
@@ -147,6 +203,55 @@ def supervisor_node(state: AgentState) -> Command:
     )
 
     iteration = state.get("iteration_count", 0)
+    pending_action = state.get("pending_action") or {}
+    approval_status = state.get("approval_status", "not_required")
+
+    if state.get("needs_human", False):
+        return Command(
+            goto="human_review",
+            update={
+                "current_agent": "supervisor",
+                "status": "waiting_for_human",
+                "iteration_count": iteration + 1,
+            },
+        )
+
+    if not pending_action:
+        discovered = _extract_pending_github_action(state)
+        if discovered:
+            question = (
+                "Approval required before creating GitHub repository.\n"
+                f"Proposed repo name: {discovered['proposed_params']['name']}\n"
+                f"Visibility: {discovered['proposed_params']['visibility']}\n"
+                "Approve, edit, or reject this action."
+            )
+            return Command(
+                goto="human_review",
+                update={
+                    "pending_action": discovered,
+                    "approval_status": "pending",
+                    "needs_human": True,
+                    "human_question": question,
+                    "status": "waiting_for_human",
+                    "current_agent": "supervisor",
+                    "iteration_count": iteration + 1,
+                },
+            )
+
+    if (
+        pending_action
+        and pending_action.get("type") == "create_github_repo"
+        and approval_status == "approved"
+        and not state.get("github_repo_created", False)
+    ):
+        return Command(
+            goto="github_repo_action",
+            update={
+                "current_agent": "GitHubRepoAction",
+                "status": "running",
+                "iteration_count": iteration + 1,
+            },
+        )
 
     # Safety: max 10 iterations
     if iteration >= 10:
@@ -332,7 +437,8 @@ Previous results:
 {chr(10).join(state.get('results', ['None']))}
 
 Execute the next coding or workspace implementation step from the plan.
-Only perform code/file/shell implementation tasks that match your role."""
+Only perform code/file/shell implementation tasks that match your role.
+Do not create GitHub repositories directly; that is handled by privileged workflow after human approval."""
 
     task_msg = HumanMessage(content=context)
     result = agent.invoke({"messages": [task_msg]})
@@ -427,16 +533,117 @@ def human_review_node(state: AgentState) -> dict:
         "task_id": state["task_id"],
         "question": question,
         "type": "hitl_request",
+        "pending_action": state.get("pending_action") or {},
     })
 
-    # When resumed, human_response contains the user's input
-    return {
-        "messages": [HumanMessage(content=f"[Human Input] {human_response}")],
-        "needs_human": False,
-        "human_question": "",
+    payload = _parse_human_response_payload(human_response)
+    approval = payload.get("approval") if isinstance(payload, dict) else None
+    pending = state.get("pending_action") or {}
+    action_id = pending.get("action_id")
+
+    update: dict = {
+        "messages": [HumanMessage(content=f"[Human Input] {payload}")],
         "status": "running",
         "current_agent": "supervisor",
     }
+
+    if action_id:
+        if isinstance(approval, dict) and approval.get("action_id") == action_id:
+            decision = (approval.get("decision") or "").lower()
+            if decision in {"approve", "edit"}:
+                merged_params = dict(pending.get("proposed_params") or {})
+                merged_params.update(approval.get("params") or {})
+                pending["approved_params"] = merged_params
+                pending["approved_by"] = approval.get("approved_by") or "human_operator"
+                update.update({
+                    "pending_action": pending,
+                    "approval_status": "approved",
+                    "needs_human": False,
+                    "human_question": "",
+                })
+            else:
+                update.update({
+                    "approval_status": "rejected",
+                    "needs_human": True,
+                    "human_question": "GitHub repo creation was rejected. Edit and approve to continue.",
+                    "status": "waiting_for_human",
+                })
+        else:
+            update.update({
+                "approval_status": "pending",
+                "needs_human": True,
+                "human_question": "Missing or invalid approval payload for pending privileged action.",
+                "status": "waiting_for_human",
+            })
+    else:
+        update.update({
+            "needs_human": False,
+            "human_question": "",
+        })
+    return update
+
+
+def github_repo_action_node(state: AgentState) -> dict:
+    """Execute approved GitHub repository creation action."""
+    pending = state.get("pending_action") or {}
+    params = pending.get("approved_params") or pending.get("proposed_params") or {}
+    repo_name = (params.get("name") or "").strip()
+    visibility = (params.get("visibility") or "private").strip().lower()
+    owner = (params.get("owner") or "").strip()
+    description = (params.get("description") or "").strip()
+
+    if not repo_name:
+        return {
+            "messages": [AIMessage(content="[GitHubRepoAction] Missing repository name in approved parameters.")],
+            "results": ["GitHubRepoAction: Failed - missing repository name"],
+            "needs_human": True,
+            "human_question": "Approved action is missing repository name. Please edit and approve again.",
+            "status": "waiting_for_human",
+            "current_agent": "supervisor",
+        }
+
+    vis_flag = "--public" if visibility == "public" else "--private"
+    owner_prefix = f"{owner}/" if owner else ""
+    escaped_description = description.replace('"', '\\"')
+    command = f'gh repo create {owner_prefix}{repo_name} {vis_flag} --description "{escaped_description}" --confirm'
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+        if result.returncode != 0:
+            return {
+                "messages": [AIMessage(content=f"[GitHubRepoAction] Failed to create repository.\n{output.strip()}")],
+                "results": ["GitHubRepoAction: Failed to create repository"],
+                "needs_human": True,
+                "human_question": (
+                    "GitHub repo creation failed. Confirm gh auth, permissions, and parameters, then approve again.\n"
+                    f"Error:\n{output.strip()[:1200]}"
+                ),
+                "status": "waiting_for_human",
+                "current_agent": "supervisor",
+            }
+        return {
+            "messages": [AIMessage(content=f"[GitHubRepoAction] Repository created successfully.\n{output.strip()}")],
+            "results": [f"GitHubRepoAction: Created repository {owner_prefix}{repo_name} ({visibility})"],
+            "github_repo_created": True,
+            "current_agent": "supervisor",
+            "status": "running",
+        }
+    except Exception as exc:
+        return {
+            "messages": [AIMessage(content=f"[GitHubRepoAction] Exception: {str(exc)}")],
+            "results": [f"GitHubRepoAction: Exception during creation - {str(exc)}"],
+            "needs_human": True,
+            "human_question": "GitHub repo creation raised an exception. Please review and approve retry.",
+            "status": "waiting_for_human",
+            "current_agent": "supervisor",
+        }
 
 
 def finalize_node(state: AgentState) -> dict:
@@ -469,6 +676,7 @@ def build_supervisor_graph():
     graph.add_node("reviewer_agent", reviewer_agent_node)
     graph.add_node("custom_agent", custom_agent_node)
     graph.add_node("human_review", human_review_node)
+    graph.add_node("github_repo_action", github_repo_action_node)
     graph.add_node("finalize", finalize_node)
 
     # Entry point
@@ -480,6 +688,7 @@ def build_supervisor_graph():
     graph.add_edge("reviewer_agent", "supervisor")
     graph.add_edge("custom_agent", "supervisor")
     graph.add_edge("human_review", "supervisor")
+    graph.add_edge("github_repo_action", "supervisor")
 
     # Finalize ends the graph
     graph.add_edge("finalize", END)
