@@ -1,0 +1,21 @@
+{
+  "name": "olympus",
+  "version": "1.0.0",
+  "description": "Olympus - Desktop Application",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:renderer": "cd renderer && npm run dev",
+    "build:renderer": "cd renderer && npm run build",
+    "install:all": "npm install && cd renderer && npm install"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "concurrently": "^9.1.0",
+    "wait-on": "^8.0.1"
+  }
+}

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\zappe\OneDrive\Documents\olympus\desktop-app\backend\test_graph.py", line 16, in test
+    graph = compile_graph()
+  File "C:\Users\zappe\OneDrive\Documents\olympus\desktop-app\backend\orchestrator\graph.py", line 325, in compile_graph
+    checkpointer.setup()  # Create checkpoint tables
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: '_GeneratorContextManager' object has no attribute 'setup'
+Settings API Key: SET
+Compiling graph...
+FAILED: '_GeneratorContextManager' object has no attribute 'setup'
