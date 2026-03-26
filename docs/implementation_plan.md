@@ -45,95 +45,95 @@ graph TD
 
 ### Project Root
 
-#### [NEW] [docker-compose.yml](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/docker-compose.yml)
+#### [NEW] [docker-compose.yml](file:///c:/Users/zappe/OneDrive/Documents/olympus/docker-compose.yml)
 PostgreSQL (state/checkpoints) and Redis (WebSocket pub/sub).
 
-#### [NEW] [.env.example](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/.env.example)
+#### [NEW] [.env.example](file:///c:/Users/zappe/OneDrive/Documents/olympus/.env.example)
 Template for `OPENAI_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
 
 ---
 
 ### Backend — FastAPI + LangGraph
 
-#### [NEW] [requirements.txt](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/requirements.txt)
+#### [NEW] [requirements.txt](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/requirements.txt)
 `fastapi`, `uvicorn`, `sqlalchemy`, `asyncpg`, `psycopg2-binary`, `langgraph`, `langchain`, `langchain-openai`, `pydantic`, `websockets`, `redis`
 
-#### [NEW] [config.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/config.py)
+#### [NEW] [config.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/config.py)
 Environment config via pydantic-settings.
 
-#### [NEW] [models/database.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/models/database.py)
+#### [NEW] [models/database.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/models/database.py)
 SQLAlchemy models: `Task`, `ActionLog`. Async engine + session factory.
 
-#### [NEW] [models/schemas.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/models/schemas.py)
+#### [NEW] [models/schemas.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/models/schemas.py)
 Pydantic schemas. Task states: `queued | running | waiting_for_human | completed | failed`.
 
-#### [NEW] [agents/tools.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/agents/tools.py)
+#### [NEW] [agents/tools.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/agents/tools.py)
 LangChain tools: `run_shell_command`, `read_file`, `write_file`, `list_directory`. These are real tool implementations.
 
-#### [NEW] [agents/coding_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/agents/coding_agent.py)
+#### [NEW] [agents/coding_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/agents/coding_agent.py)
 ReAct agent via `create_react_agent` with shell + file tools. System prompt for coding tasks.
 
-#### [NEW] [agents/reviewer_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/agents/reviewer_agent.py)
+#### [NEW] [agents/reviewer_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/agents/reviewer_agent.py)
 ReAct agent for code review. Can call `interrupt()` when confidence is low.
 
-#### [NEW] [agents/workflow_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/agents/workflow_agent.py)
+#### [NEW] [agents/workflow_agent.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/agents/workflow_agent.py)
 ReAct agent that parses task descriptions into sub-task plans.
 
-#### [NEW] [orchestrator/graph.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/orchestrator/graph.py)
+#### [NEW] [orchestrator/graph.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/orchestrator/graph.py)
 **Core LangGraph graph**: Supervisor `StateGraph` with conditional routing to sub-agents. Uses `PostgresSaver` for checkpointing. Implements `interrupt()` for HITL. This replaces both the old orchestrator engine and Celery queue.
 
-#### [NEW] [orchestrator/router.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/orchestrator/router.py)
+#### [NEW] [orchestrator/router.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/orchestrator/router.py)
 FastAPI router: `POST /tasks`, `GET /tasks`, `POST /tasks/{id}/resume`, `GET /agents/status`.
 
-#### [NEW] [orchestrator/websocket.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/orchestrator/websocket.py)
+#### [NEW] [orchestrator/websocket.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/orchestrator/websocket.py)
 WebSocket manager at `/ws`. Pushes task state changes, agent logs, HITL events.
 
-#### [NEW] [main.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/backend/main.py)
+#### [NEW] [main.py](file:///c:/Users/zappe/OneDrive/Documents/olympus/backend/main.py)
 FastAPI app entrypoint.
 
 ---
 
 ### Electron — Main Process
 
-#### [NEW] [main/main.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/main/main.js)
+#### [NEW] [main/main.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/main/main.js)
 Electron main process. Creates BrowserWindow, loads renderer, registers IPC handlers.
 
-#### [NEW] [main/preload.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/main/preload.js)
+#### [NEW] [main/preload.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/main/preload.js)
 Secure IPC bridge via `contextBridge`.
 
-#### [NEW] [main/ipc-handlers.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/main/ipc-handlers.js)
+#### [NEW] [main/ipc-handlers.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/main/ipc-handlers.js)
 IPC implementations: shell execution, file I/O, native notifications.
 
 ---
 
 ### Electron — Renderer (React + Tailwind)
 
-#### [NEW] [renderer/src/App.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/App.jsx)
+#### [NEW] [renderer/src/App.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/App.jsx)
 Root component with tab nav: Task Board, Agent Inspector, Intervention Panel.
 
-#### [NEW] [renderer/src/components/TaskBoard.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/components/TaskBoard.jsx)
+#### [NEW] [renderer/src/components/TaskBoard.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/components/TaskBoard.jsx)
 Kanban board: Queued → Running → Blocked → Done.
 
-#### [NEW] [renderer/src/components/AgentInspector.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/components/AgentInspector.jsx)
+#### [NEW] [renderer/src/components/AgentInspector.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/components/AgentInspector.jsx)
 Agent status, capabilities, and streaming logs.
 
-#### [NEW] [renderer/src/components/InterventionPanel.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/components/InterventionPanel.jsx)
+#### [NEW] [renderer/src/components/InterventionPanel.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/components/InterventionPanel.jsx)
 HITL panel: shows blocked tasks, reason, and input form to resume.
 
-#### [NEW] [renderer/src/components/CreateTaskModal.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/components/CreateTaskModal.jsx)
+#### [NEW] [renderer/src/components/CreateTaskModal.jsx](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/components/CreateTaskModal.jsx)
 Modal for creating new tasks.
 
-#### [NEW] [renderer/src/hooks/useWebSocket.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/hooks/useWebSocket.js)
+#### [NEW] [renderer/src/hooks/useWebSocket.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/hooks/useWebSocket.js)
 WebSocket hook for real-time updates from backend.
 
-#### [NEW] [renderer/src/api.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/desktop-app/renderer/src/api.js)
+#### [NEW] [renderer/src/api.js](file:///c:/Users/zappe/OneDrive/Documents/olympus/renderer/src/api.js)
 REST API client for FastAPI backend.
 
 ---
 
 ### Shared Schemas
 
-#### [NEW] [schemas/types.ts](file:///c:/Users/zappe/OneDrive/Documents/olympus/desktop-app/shared/schemas/types.ts)
+#### [NEW] [schemas/types.ts](file:///c:/Users/zappe/OneDrive/Documents/olympus/shared/schemas/types.ts)
 TypeScript types mirroring Pydantic schemas.
 
 ---
@@ -143,7 +143,7 @@ TypeScript types mirroring Pydantic schemas.
 ### Startup Sequence
 1. `docker-compose up -d` — PostgreSQL + Redis
 2. `cd backend && uvicorn main:app --reload` — FastAPI + LangGraph
-3. `cd desktop-app && npm start` — Electron
+3. `npm start` — Electron
 
 ### End-to-End Test
 1. Create task "Build API endpoint for CSV upload" from UI
